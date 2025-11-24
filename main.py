@@ -205,7 +205,7 @@ def main():
 
                 imgui.text(f"# of Gaus = {len(gaussians)}")
                 if imgui.button(label='open ply'):
-                    file_path = ("./data/mono.ply")
+                    file_path = ("./data/eighth.ply")
                     if file_path:
                         try:
                             start = time.time()
