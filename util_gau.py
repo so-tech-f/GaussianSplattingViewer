@@ -132,7 +132,6 @@ def compute_cov3d_in_gpu(scales: np.ndarray, rots: np.ndarray) -> int:
     # GPUリソースを解放
     glDeleteBuffers(1, [input_buffer])
     glDeleteProgram(compute_shader_program)
-    print(f"output_buffer {output_buffer}")
     return output_buffer
 
 def load_ply(path):
