@@ -2,6 +2,7 @@ from OpenGL import GL as gl
 import util
 import util_gau
 import numpy as np
+from OpenGL.GL import *
 
 try:
     from OpenGL.raw.WGL.EXT.swap_control import wglSwapIntervalEXT
@@ -142,6 +143,7 @@ class OpenGLRenderer(GaussianRenderBase):
         self.vao = vao
         self.gau_bufferid = None
         self.index_bufferid = None
+        self.sigmas_bufferid = None
         # opengl settings
         gl.glDisable(gl.GL_CULL_FACE)
         gl.glEnable(gl.GL_BLEND)
@@ -159,10 +161,14 @@ class OpenGLRenderer(GaussianRenderBase):
         self.gaussians = gaus
         # load gaussian geometry
         gaussian_data = gaus.flat()
-        self.gau_bufferid = util.set_storage_buffer_data(self.program, "gaussian_data", gaussian_data, 
+        self.gau_bufferid = util.set_storage_buffer_data(self.program, "gaussian_data", gaussian_data,
                                                          bind_idx=0,
                                                          buffer_id=self.gau_bufferid)
         util.set_uniform_1int(self.program, gaus.sh_dim, "sh_dim")
+        sigmas_buffer_id = gaus.sigmas_buffer
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, sigmas_buffer_id)
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, sigmas_buffer_id)
+        self.sigmas_bufferid = sigmas_buffer_id
 
     def sort_and_update(self, camera: util.Camera):
         index = _sort_gaussian(self.gaussians, camera.get_view_matrix())

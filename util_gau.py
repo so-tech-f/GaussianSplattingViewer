@@ -2,24 +2,27 @@ import numpy as np
 from plyfile import PlyData
 from dataclasses import dataclass
 from scipy.spatial.transform import Rotation as R
+from OpenGL.GL import *
+import OpenGL.GL.shaders as shaders
+import ctypes
 
 @dataclass
 class GaussianData:
     xyz: np.ndarray
-    sigmas: np.ndarray
     opacity: np.ndarray
     sh: np.ndarray
+    sigmas: np.ndarray = None
+    sigmas_buffer: int = None
     def flat(self) -> np.ndarray:
-        ret = np.concatenate([self.xyz, self.sigmas, self.opacity, self.sh], axis=-1)
+        ret = np.concatenate([self.xyz, self.opacity, self.sh], axis=-1)
         return np.ascontiguousarray(ret)
-    
+
     def __len__(self):
         return len(self.xyz)
-    
+
     @property 
     def sh_dim(self):
         return self.sh.shape[-1]
-
 
 def naive_gaussian():
     gau_xyz = np.array([
@@ -50,12 +53,13 @@ def naive_gaussian():
     gau_a = np.array([
         1, 1, 1, 1
     ]).astype(np.float32).reshape(-1, 1)
-    gau_sigmas = compute_cov3d(gau_s, gau_rot)
+    gau_sigmas_buffer = compute_cov3d_in_gpu(gau_s, gau_rot)
     return GaussianData(
-        gau_xyz,
-        gau_sigmas,
-        gau_a,
-        gau_c
+        xyz=gau_xyz,
+        opacity=gau_a,
+        sh=gau_c,
+        sigmas=None,
+        sigmas_buffer=gau_sigmas_buffer
     )
 
 def compute_cov3d(scales: np.ndarray, rots: np.ndarray) -> np.ndarray:
@@ -79,14 +83,14 @@ def compute_cov3d(scales: np.ndarray, rots: np.ndarray) -> np.ndarray:
     S_mat[:, 1, 1] = scales[:, 1]
     S_mat[:, 2, 2] = scales[:, 2]
 
-    R_mat_T = np.transpose(R_mat, (0, 2, 1)) 
+    R_mat_T = np.transpose(R_mat, (0, 2, 1))
 
     M = np.matmul(S_mat, R_mat_T)
     M_T = np.transpose(M, (0, 2, 1))
 
     Sigma = np.matmul(M_T, M)
 
-    sigmas_n6 = np.stack([
+    sigmas = np.stack([
         Sigma[:, 0, 0],  # sxx
         Sigma[:, 1, 1],  # syy
         Sigma[:, 2, 2],  # szz
@@ -95,7 +99,41 @@ def compute_cov3d(scales: np.ndarray, rots: np.ndarray) -> np.ndarray:
         Sigma[:, 1, 2],  # syz
     ], axis=1)
 
-    return sigmas_n6.astype(np.float32)
+    return sigmas.astype(np.float32)
+
+def compute_cov3d_in_gpu(scales: np.ndarray, rots: np.ndarray) -> int:
+    input_data = np.concatenate((scales, rots), axis=1).astype(np.float32)
+    # 入力 ssbo (binding point 0)
+    input_buffer = glGenBuffers(1)
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, input_buffer)
+    glBufferData(GL_SHADER_STORAGE_BUFFER, input_data.nbytes, input_data, GL_STATIC_DRAW)
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, input_buffer)
+    # 出力 ssbo (binding point 1)
+    output_size = scales.shape[0] * 6 * 4  # N x 6 x sizeof(float)
+    output_buffer = glGenBuffers(1)
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, output_buffer)
+    glBufferData(GL_SHADER_STORAGE_BUFFER, output_size, None, GL_STATIC_DRAW)
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, output_buffer)
+
+    num_gaussians = scales.shape[0]
+    # ワークグループサイズを定義 (256 threds per workgroup)
+    LOCAL_SIZE = 256
+    num_groups = (num_gaussians + LOCAL_SIZE - 1) // LOCAL_SIZE
+    compute_shader = open("shaders/compute_cov3d.glsl", "r").read()
+    compute_shader_program = shaders.compileProgram(
+        shaders.compileShader(compute_shader, GL_COMPUTE_SHADER)
+    )
+    glUseProgram(compute_shader_program)
+    glDispatchCompute(num_groups, 1, 1) # 計算を開始
+    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT) # 計算の完了を待つ
+
+    # バッファのバインドを解除
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0)
+    # GPUリソースを解放
+    glDeleteBuffers(1, [input_buffer])
+    glDeleteProgram(compute_shader_program)
+    print(f"output_buffer {output_buffer}")
+    return output_buffer
 
 def load_ply(path):
     max_sh_degree = 3
@@ -138,13 +176,16 @@ def load_ply(path):
     rots = rots.astype(np.float32)
     scales = np.exp(scales)
     scales = scales.astype(np.float32)
-    num_gaussians = len(xyz)
-    sigmas = np.zeros((num_gaussians, 6), dtype=np.float32)
-    sigmas = compute_cov3d(scales, rots)
+
+    sigmas_buffer = compute_cov3d_in_gpu(scales, rots)
     opacities = 1/(1 + np.exp(- opacities))  # sigmoid
     opacities = opacities.astype(np.float32)
-    shs = np.concatenate([features_dc.reshape(-1, 3), 
+    shs = np.concatenate([features_dc.reshape(-1, 3),
                         features_extra.reshape(len(features_dc), -1)], axis=-1).astype(np.float32)
     shs = shs.astype(np.float32)
-    return GaussianData(xyz, sigmas, opacities, shs)
-
+    return GaussianData(
+        xyz=xyz,
+        opacity=opacities,
+        sh=shs, 
+        sigmas=None,
+        sigmas_buffer=sigmas_buffer)
