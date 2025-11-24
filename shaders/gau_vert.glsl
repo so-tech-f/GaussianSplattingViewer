@@ -176,41 +176,37 @@ void main()
 	vec3 dir = g_pos.xyz - cam_pos;
     dir = normalize(dir);
 	color = SH_C0 * get_vec3(sh_start);
-	float x = dir.x;
-	float y = dir.y;
-	float z = dir.z;
-	color = color - SH_C1 * y * get_vec3(sh_start + 1 * 3) + SH_C1 * z * get_vec3(sh_start + 2 * 3) - SH_C1 * x * get_vec3(sh_start + 3 * 3);
 
-	// if (sh_dim > 3 && render_mod >= 1)  // 1 * 3
-	// {
-	// 	float x = dir.x;
-	// 	float y = dir.y;
-	// 	float z = dir.z;
-	// 	color = color - SH_C1 * y * get_vec3(sh_start + 1 * 3) + SH_C1 * z * get_vec3(sh_start + 2 * 3) - SH_C1 * x * get_vec3(sh_start + 3 * 3);
+	if (sh_dim > 3 && render_mod >= 1)  // 1 * 3
+	{
+		float x = dir.x;
+		float y = dir.y;
+		float z = dir.z;
+		color = color - SH_C1 * y * get_vec3(sh_start + 1 * 3) + SH_C1 * z * get_vec3(sh_start + 2 * 3) - SH_C1 * x * get_vec3(sh_start + 3 * 3);
 
-	// 	if (sh_dim > 12 && render_mod >= 2)  // (1 + 3) * 3
-	// 	{
-	// 		float xx = x * x, yy = y * y, zz = z * z;
-	// 		float xy = x * y, yz = y * z, xz = x * z;
-	// 		color = color +
-	// 			SH_C2_0 * xy * get_vec3(sh_start + 4 * 3) +
-	// 			SH_C2_1 * yz * get_vec3(sh_start + 5 * 3) +
-	// 			SH_C2_2 * (2.0f * zz - xx - yy) * get_vec3(sh_start + 6 * 3) +
-	// 			SH_C2_3 * xz * get_vec3(sh_start + 7 * 3) +
-	// 			SH_C2_4 * (xx - yy) * get_vec3(sh_start + 8 * 3);
+		if (sh_dim > 12 && render_mod >= 2)  // (1 + 3) * 3
+		{
+			float xx = x * x, yy = y * y, zz = z * z;
+			float xy = x * y, yz = y * z, xz = x * z;
+			color = color +
+				SH_C2_0 * xy * get_vec3(sh_start + 4 * 3) +
+				SH_C2_1 * yz * get_vec3(sh_start + 5 * 3) +
+				SH_C2_2 * (2.0f * zz - xx - yy) * get_vec3(sh_start + 6 * 3) +
+				SH_C2_3 * xz * get_vec3(sh_start + 7 * 3) +
+				SH_C2_4 * (xx - yy) * get_vec3(sh_start + 8 * 3);
 
-	// 		if (sh_dim > 27 && render_mod >= 3)  // (1 + 3 + 5) * 3
-	// 		{
-	// 			color = color +
-	// 				SH_C3_0 * y * (3.0f * xx - yy) * get_vec3(sh_start + 9 * 3) +
-	// 				SH_C3_1 * xy * z * get_vec3(sh_start + 10 * 3) +
-	// 				SH_C3_2 * y * (4.0f * zz - xx - yy) * get_vec3(sh_start + 11 * 3) +
-	// 				SH_C3_3 * z * (2.0f * zz - 3.0f * xx - 3.0f * yy) * get_vec3(sh_start + 12 * 3) +
-	// 				SH_C3_4 * x * (4.0f * zz - xx - yy) * get_vec3(sh_start + 13 * 3) +
-	// 				SH_C3_5 * z * (xx - yy) * get_vec3(sh_start + 14 * 3) +
-	// 				SH_C3_6 * x * (xx - 3.0f * yy) * get_vec3(sh_start + 15 * 3);
-	// 		}
-	// 	}
-	// }
+			if (sh_dim > 27 && render_mod >= 3)  // (1 + 3 + 5) * 3
+			{
+				color = color +
+					SH_C3_0 * y * (3.0f * xx - yy) * get_vec3(sh_start + 9 * 3) +
+					SH_C3_1 * xy * z * get_vec3(sh_start + 10 * 3) +
+					SH_C3_2 * y * (4.0f * zz - xx - yy) * get_vec3(sh_start + 11 * 3) +
+					SH_C3_3 * z * (2.0f * zz - 3.0f * xx - 3.0f * yy) * get_vec3(sh_start + 12 * 3) +
+					SH_C3_4 * x * (4.0f * zz - xx - yy) * get_vec3(sh_start + 13 * 3) +
+					SH_C3_5 * z * (xx - yy) * get_vec3(sh_start + 14 * 3) +
+					SH_C3_6 * x * (xx - 3.0f * yy) * get_vec3(sh_start + 15 * 3);
+			}
+		}
+	}
 	color += 0.5f;
 }

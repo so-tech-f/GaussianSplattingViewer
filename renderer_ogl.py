@@ -60,6 +60,7 @@ def _sort_gaussian_torch(gaus, view_mat):
     return index
 
 
+
 # Decide which sort to use
 _sort_gaussian = None
 try:

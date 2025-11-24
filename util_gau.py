@@ -135,7 +135,6 @@ def compute_cov3d_in_gpu(scales: np.ndarray, rots: np.ndarray) -> int:
     return output_buffer
 
 def load_ply(path):
-    max_sh_degree = 3
     plydata = PlyData.read(path)
     xyz = np.stack((np.asarray(plydata.elements[0]["x"]),
                     np.asarray(plydata.elements[0]["y"]),
@@ -148,8 +147,14 @@ def load_ply(path):
     features_dc[:, 2, 0] = np.asarray(plydata.elements[0]["f_dc_2"])
 
     extra_f_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("f_rest_")]
-    extra_f_names = sorted(extra_f_names, key = lambda x: int(x.split('_')[-1]))
+    extra_coeffs_num = len(extra_f_names)
+    if extra_coeffs_num > 0:
+        max_sh_degree = int(np.sqrt(extra_coeffs_num / 3 + 1) - 1)
+    else:
+        max_sh_degree = 0
     assert len(extra_f_names)==3 * (max_sh_degree + 1) ** 2 - 3
+    extra_f_names = sorted(extra_f_names, key = lambda x: int(x.split('_')[-1]))
+
     features_extra = np.zeros((xyz.shape[0], len(extra_f_names)))
     for idx, attr_name in enumerate(extra_f_names):
         features_extra[:, idx] = np.asarray(plydata.elements[0][attr_name])
