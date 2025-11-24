@@ -142,7 +142,7 @@ void main()
 	float sigma_x = sqrt(max(cov2d.x, 0.0));
 	float sigma_y = sqrt(max(cov2d.z, 0.0));
 	// 直径 = 2 * sigma. 直径 <= 2px => sigma <= 1px
-	if (max(sigma_x, sigma_y) <= 1.0) {
+	if (max(sigma_x, sigma_y) <= 0.5) {
 		gl_Position = vec4(-100, -100, -100, 1);
 		return;
 		}
