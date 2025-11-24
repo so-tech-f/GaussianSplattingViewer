@@ -26,10 +26,9 @@ layout(location = 0) in vec2 position;
 
 
 #define POS_IDX 0
-#define ROT_IDX 3
-#define SCALE_IDX 7
-#define OPACITY_IDX 10
-#define SH_IDX 11
+#define SIGMA_IDX 3
+#define OPACITY_IDX 9
+#define SH_IDX 10
 
 layout (std430, binding=0) buffer gaussian_data {
 	float g_data[];
@@ -118,7 +117,7 @@ vec4 get_vec4(int offset)
 void main()
 {
 	int boxid = gi[gl_InstanceID];
-	int total_dim = 3 + 4 + 3 + 1 + sh_dim;
+	int total_dim = 3 + 6 + 1 + sh_dim;
 	int start = boxid * total_dim;
 	vec4 g_pos = vec4(get_vec3(start + POS_IDX), 1.f);
     vec4 g_pos_view = view_matrix * g_pos;
@@ -131,11 +130,20 @@ void main()
 		gl_Position = vec4(-100, -100, -100, 1);
 		return;
 	}
-	vec4 g_rot = get_vec4(start + ROT_IDX);
-	vec3 g_scale = get_vec3(start + SCALE_IDX);
+
+	float sxx = g_data[start + SIGMA_IDX + 0];
+	float syy = g_data[start + SIGMA_IDX + 1];
+	float szz = g_data[start + SIGMA_IDX + 2];
+	float sxy = g_data[start + SIGMA_IDX + 3];
+	float sxz = g_data[start + SIGMA_IDX + 4];
+	float syz = g_data[start + SIGMA_IDX + 5];
 	float g_opacity = g_data[start + OPACITY_IDX];
 
-    mat3 cov3d = computeCov3D(g_scale * scale_modifier, g_rot);
+    mat3 cov3d = mat3(
+		sxx, sxy, sxz,
+		sxy, syy, syz,
+		sxz, syz, szz
+	);
     vec2 wh = 2 * hfovxy_focal.xy * hfovxy_focal.z;
     vec3 cov2d = computeCov2D(g_pos_view, 
                               hfovxy_focal.z, 

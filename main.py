@@ -18,6 +18,7 @@ import os
 import sys
 import argparse
 from renderer_ogl import OpenGLRenderer, GaussianRenderBase
+import time
 
 
 # Add the directory containing main.py to the Python path
@@ -204,15 +205,17 @@ def main():
 
                 imgui.text(f"# of Gaus = {len(gaussians)}")
                 if imgui.button(label='open ply'):
-                    file_path = ("/home/shu/gsplat/results/train-bg/ply/point_cloud_9999.ply")
+                    file_path = ("./data/mono.ply")
                     if file_path:
                         try:
+                            start = time.time()
                             gaussians = util_gau.load_ply(file_path)
+                            print(f"load ply time: {time.time() - start:.3f} sec")
                             g_renderer.update_gaussian_data(gaussians)
                             g_renderer.sort_and_update(g_camera)
                         except RuntimeError as e:
                             pass
-                
+
                 # camera fov
                 changed, g_camera.fovy = imgui.slider_float(
                     "fov", g_camera.fovy, 0.001, np.pi - 0.001, "fov = %.3f"

@@ -1,16 +1,16 @@
 import numpy as np
 from plyfile import PlyData
 from dataclasses import dataclass
+from scipy.spatial.transform import Rotation as R
 
 @dataclass
 class GaussianData:
     xyz: np.ndarray
-    rot: np.ndarray
-    scale: np.ndarray
+    sigmas: np.ndarray
     opacity: np.ndarray
     sh: np.ndarray
     def flat(self) -> np.ndarray:
-        ret = np.concatenate([self.xyz, self.rot, self.scale, self.opacity, self.sh], axis=-1)
+        ret = np.concatenate([self.xyz, self.sigmas, self.opacity, self.sh], axis=-1)
         return np.ascontiguousarray(ret)
     
     def __len__(self):
@@ -50,14 +50,23 @@ def naive_gaussian():
     gau_a = np.array([
         1, 1, 1, 1
     ]).astype(np.float32).reshape(-1, 1)
+    gau_sigmas = np.array([compute_cov3d(gau_s[i], gau_rot[i]) for i in range(len(gau_xyz))], dtype=np.float32)
     return GaussianData(
         gau_xyz,
-        gau_rot,
-        gau_s,
+        gau_sigmas,
         gau_a,
         gau_c
     )
 
+def compute_cov3d(scales, rots):
+    S = np.diag(scales)
+    q_xyzr = rots[[1, 2, 3, 0]]
+    R_mat = R.from_quat(q_xyzr).as_matrix()
+    M = S @ R_mat.T
+    Sigma = M.T @ M
+    sxx, syy, szz = Sigma[0, 0], Sigma[1, 1], Sigma[2, 2]
+    sxy, sxz, syz = Sigma[0, 1], Sigma[0, 2], Sigma[1, 2]
+    return np.array([sxx, syy, szz, sxy, sxz, syz], dtype=np.float32)
 
 def load_ply(path):
     max_sh_degree = 3
@@ -100,14 +109,13 @@ def load_ply(path):
     rots = rots.astype(np.float32)
     scales = np.exp(scales)
     scales = scales.astype(np.float32)
+    num_gaussians = len(xyz)
+    sigmas = np.zeros((num_gaussians, 6), dtype=np.float32)
+    sigmas = np.array([compute_cov3d(scales[i], rots[i]) for i in range(num_gaussians)], dtype=np.float32)
     opacities = 1/(1 + np.exp(- opacities))  # sigmoid
     opacities = opacities.astype(np.float32)
     shs = np.concatenate([features_dc.reshape(-1, 3), 
                         features_extra.reshape(len(features_dc), -1)], axis=-1).astype(np.float32)
     shs = shs.astype(np.float32)
-    return GaussianData(xyz, rots, scales, opacities, shs)
+    return GaussianData(xyz, sigmas, opacities, shs)
 
-if __name__ == "__main__":
-    gs = load_ply("C:\\Users\\MSI_NB\\Downloads\\viewers\\models\\train\\point_cloud\\iteration_7000\\point_cloud.ply")
-    a = gs.flat()
-    print(a.shape)
