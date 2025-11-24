@@ -88,7 +88,7 @@ class GaussianRenderBase:
     @reduce_updates.setter
     def reduce_updates(self, val):
         self._reduce_updates = val
-        self.update_vsync()
+        # self.update_vsync()
 
     def update_vsync(self):
         print("VSync is not supported")
@@ -147,7 +147,7 @@ class OpenGLRenderer(GaussianRenderBase):
         gl.glEnable(gl.GL_BLEND)
         gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
 
-        self.update_vsync()
+        # self.update_vsync()
 
     def update_vsync(self):
         if wglSwapIntervalEXT is not None:
