@@ -50,7 +50,7 @@ def naive_gaussian():
     gau_a = np.array([
         1, 1, 1, 1
     ]).astype(np.float32).reshape(-1, 1)
-    gau_sigmas = np.array([compute_cov3d(gau_s[i], gau_rot[i]) for i in range(len(gau_xyz))], dtype=np.float32)
+    gau_sigmas = compute_cov3d(gau_s, gau_rot)
     return GaussianData(
         gau_xyz,
         gau_sigmas,
@@ -58,15 +58,44 @@ def naive_gaussian():
         gau_c
     )
 
-def compute_cov3d(scales, rots):
-    S = np.diag(scales)
-    q_xyzr = rots[[1, 2, 3, 0]]
+def compute_cov3d(scales: np.ndarray, rots: np.ndarray) -> np.ndarray:
+    """
+    全ガウス分布のスケールと回転から3次元共分散行列 (N x 6) をベクトル化して計算する。
+
+    Args:
+        scales (np.ndarray): 全ガウス分布のスケール (N, 3).
+        rots (np.ndarray): 全ガウス分布のクォータニオン (N, 4), 順序は (r, x, y, z).
+
+    Returns:
+        np.ndarray: 対称行列 Sigma の6つの独立した要素 (sxx, syy, szz, sxy, sxz, syz) (N, 6).
+    """
+    N = scales.shape[0]
+
+    q_xyzr = rots[:, [1, 2, 3, 0]]
     R_mat = R.from_quat(q_xyzr).as_matrix()
-    M = S @ R_mat.T
-    Sigma = M.T @ M
-    sxx, syy, szz = Sigma[0, 0], Sigma[1, 1], Sigma[2, 2]
-    sxy, sxz, syz = Sigma[0, 1], Sigma[0, 2], Sigma[1, 2]
-    return np.array([sxx, syy, szz, sxy, sxz, syz], dtype=np.float32)
+
+    S_mat = np.zeros((N, 3, 3), dtype=np.float32)
+    S_mat[:, 0, 0] = scales[:, 0]
+    S_mat[:, 1, 1] = scales[:, 1]
+    S_mat[:, 2, 2] = scales[:, 2]
+
+    R_mat_T = np.transpose(R_mat, (0, 2, 1)) 
+
+    M = np.matmul(S_mat, R_mat_T)
+    M_T = np.transpose(M, (0, 2, 1))
+
+    Sigma = np.matmul(M_T, M)
+
+    sigmas_n6 = np.stack([
+        Sigma[:, 0, 0],  # sxx
+        Sigma[:, 1, 1],  # syy
+        Sigma[:, 2, 2],  # szz
+        Sigma[:, 0, 1],  # sxy
+        Sigma[:, 0, 2],  # sxz
+        Sigma[:, 1, 2],  # syz
+    ], axis=1)
+
+    return sigmas_n6.astype(np.float32)
 
 def load_ply(path):
     max_sh_degree = 3
@@ -111,7 +140,7 @@ def load_ply(path):
     scales = scales.astype(np.float32)
     num_gaussians = len(xyz)
     sigmas = np.zeros((num_gaussians, 6), dtype=np.float32)
-    sigmas = np.array([compute_cov3d(scales[i], rots[i]) for i in range(num_gaussians)], dtype=np.float32)
+    sigmas = compute_cov3d(scales, rots)
     opacities = 1/(1 + np.exp(- opacities))  # sigmoid
     opacities = opacities.astype(np.float32)
     shs = np.concatenate([features_dc.reshape(-1, 3), 
