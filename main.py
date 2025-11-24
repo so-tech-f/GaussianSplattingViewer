@@ -97,8 +97,6 @@ def key_callback(window, key, scancode, action, mods):
 def update_camera_pose_lazy():
     if g_camera.is_pose_dirty:
         g_renderer.update_camera_pose(g_camera)
-        if g_auto_sort:
-            g_renderer.sort_and_update(g_camera)
         g_camera.is_pose_dirty = False
 
 def update_camera_intrin_lazy():
@@ -124,24 +122,20 @@ def main():
     global g_camera, g_renderer, g_renderer_list, g_renderer_idx, g_scale_modifier, g_auto_sort, \
         g_show_control_win, g_show_help_win, g_show_camera_win, \
         g_render_mode, g_render_mode_tables
+        
     imgui.create_context()
     if args.hidpi:
         imgui.get_io().font_global_scale = 1.5
     window = impl_glfw_init()
-    print(f"OpenGL version: {gl.glGetString(gl.GL_VERSION).decode()}")
-    print(f"GLSL version: {gl.glGetString(gl.GL_SHADING_LANGUAGE_VERSION).decode()}")
-    print(f"GPU Vendor: {gl.glGetString(gl.GL_VENDOR).decode()}")
-    print(f"GPU Renderer: {gl.glGetString(gl.GL_RENDERER).decode()}")
-
     impl = GlfwRenderer(window)
     root = tk.Tk()  # used for file dialog
     root.withdraw()
-
+    
     glfw.set_cursor_pos_callback(window, cursor_pos_callback)
     glfw.set_mouse_button_callback(window, mouse_button_callback)
     glfw.set_scroll_callback(window, wheel_callback)
     glfw.set_key_callback(window, key_callback)
-
+    
     glfw.set_window_size_callback(window, window_resize_callback)
 
     # init renderer
@@ -155,22 +149,23 @@ def main():
         g_renderer_idx = BACKEND_CUDA
 
     g_renderer = g_renderer_list[g_renderer_idx]
+
     # gaussian data
     gaussians = util_gau.naive_gaussian()
     update_activated_renderer_state(gaussians)
-
+    
     # settings
     while not glfw.window_should_close(window):
         glfw.poll_events()
         impl.process_inputs()
         imgui.new_frame()
-
+        
         gl.glClearColor(0, 0, 0, 1.0)
         gl.glClear(gl.GL_COLOR_BUFFER_BIT)
 
         update_camera_pose_lazy()
         update_camera_intrin_lazy()
-
+        
         g_renderer.draw()
 
         # imgui ui
@@ -187,7 +182,7 @@ def main():
                 )
                 imgui.end_menu()
             imgui.end_main_menu_bar()
-
+        
         if g_show_control_win:
             if imgui.begin("Control", True):
                 # rendering backend
@@ -204,7 +199,7 @@ def main():
 
                 imgui.text(f"# of Gaus = {len(gaussians)}")
                 if imgui.button(label='open ply'):
-                    file_path = ("/home/shu/gsplat/results/train-bg/ply/point_cloud_9999.ply")
+                    file_path = ("./data/mono.ply")
                     if file_path:
                         try:
                             gaussians = util_gau.load_ply(file_path)
@@ -212,7 +207,7 @@ def main():
                             g_renderer.sort_and_update(g_camera)
                         except RuntimeError as e:
                             pass
-                
+
                 # camera fov
                 changed, g_camera.fovy = imgui.slider_float(
                     "fov", g_camera.fovy, 0.001, np.pi - 0.001, "fov = %.3f"
@@ -228,15 +223,15 @@ def main():
                 if imgui.button(label="reset"):
                     g_scale_modifier = 1.
                     changed = True
-
+                    
                 if changed:
                     g_renderer.set_scale_modifier(g_scale_modifier)
-
+                
                 # render mode
                 changed, g_render_mode = imgui.combo("shading", g_render_mode, g_render_mode_tables)
                 if changed:
                     g_renderer.set_render_mod(g_render_mode - 4)
-
+                
                 # sort button
                 if imgui.button(label='sort Gaussians'):
                     g_renderer.sort_and_update(g_camera)
@@ -244,10 +239,9 @@ def main():
                 changed, g_auto_sort = imgui.checkbox(
                         "auto sort", g_auto_sort,
                     )
-                # チェックボックスがONになった瞬間に一度ソートを実行
-                if changed and g_auto_sort:
+                if g_auto_sort:
                     g_renderer.sort_and_update(g_camera)
-
+                
                 if imgui.button(label='save image'):
                     width, height = glfw.get_framebuffer_size(window)
                     nrChannels = 3
