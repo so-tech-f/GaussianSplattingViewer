@@ -332,83 +332,87 @@ def main():
     window = init_opengl_context()
     
     # 2. ソーターの作成
-    sorter = RadixSorter(10000)
+    sorter = RadixSorter(100000)
     
     # 3. テストデータの生成
-    ARR_LEN = 10000
-    keys = np.random.randint(0, 1000000, ARR_LEN, dtype=np.uint32)
-    np.savetxt('keys.csv', keys, fmt='%u', delimiter=',')
-    values = np.arange(ARR_LEN, dtype=np.uint32)
+    ARR_LEN = 100000
+    values = np.random.randint(0, 10000000, ARR_LEN, dtype=np.uint32)
+    np.savetxt('values.csv', values, fmt='%u', delimiter=',')
+    indices = np.arange(ARR_LEN, dtype=np.uint32)
 
     # 4. GPUバッファの作成とデータ転送
-    key_buf = glGenBuffers(1)
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, key_buf)
-    glBufferData(GL_SHADER_STORAGE_BUFFER, keys.nbytes, keys, GL_DYNAMIC_DRAW)
-
-    val_buf = glGenBuffers(1)
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, val_buf)
+    values_buf = glGenBuffers(1)
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, values_buf)
     glBufferData(GL_SHADER_STORAGE_BUFFER, values.nbytes, values, GL_DYNAMIC_DRAW)
+
+    indices_buf = glGenBuffers(1)
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, indices_buf)
+    glBufferData(GL_SHADER_STORAGE_BUFFER, indices.nbytes, indices, GL_DYNAMIC_DRAW)
 
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0)
 
     # 5. ソート実行
     print(f"ソート対象の要素数: {ARR_LEN}")
-    sorter.sort(key_buf, val_buf, len(keys))
+    import time
+    start_time = time.time()
+    sorter.sort(values_buf, indices_buf, len(values))
+    end_time = time.time()
+    print(f"ソートにかかった時間: {end_time - start_time:.6f} 秒")
 
     # 6. 結果の読み取り
-    sorted_keys = read_buffer_data(key_buf, len(keys))
-    sorted_values = read_buffer_data(val_buf, len(values))
+    sorted_values = read_buffer_data(values_buf, len(values))
+    sorted_indices = read_buffer_data(indices_buf, len(indices))
 
     # 7. 厳密な検証と表示
     print("\n--- 結果の検証 (詳細) ---")
-    print(f"ソート前 (Keys) sample: {keys[:10]}")
-    print(f"ソート後 (Keys) sample: {sorted_keys[:10]}")
-    print(f"対応する値 (Values) sample: {sorted_values[:10]}")
+    print(f"ソート前 (Values) sample: {values[:10]}")
+    print(f"ソート後 (Values) sample: {sorted_values[:10]}")
+    print(f"対応するインデックス (Indices) sample: {sorted_indices[:10]}")
 
-    # CPUによる期待値 (キーの昇順) とソート済みインデックス
-    cpu_sorted_keys = np.sort(keys)
+    # CPUによる期待値 (値の昇順) とソート済みインデックス
+    cpu_sorted_values = np.sort(values)
     # Use a stable sort so equal keys preserve original relative order
-    cpu_argsort = np.argsort(keys, kind='stable')
+    cpu_argsort = np.argsort(values, kind='stable')
 
-    # 比較: キー
-    keys_match = np.array_equal(sorted_keys, cpu_sorted_keys)
+    # 比較: 値
+    values_match = np.array_equal(sorted_values, cpu_sorted_values)
 
-    # 比較: 値が元のインデックスに一致するか (payload の追跡が正しいか)
-    expected_values = values[cpu_argsort]
-    values_match = np.array_equal(sorted_values, expected_values)
+    # 比較: インデックスが元のインデックスに一致するか (payload の追跡が正しいか)
+    expected_indices = indices[cpu_argsort]
+    indices_match = np.array_equal(sorted_indices, expected_indices)
 
-    print(f"キー一致: {'OK' if keys_match else 'NG'}")
+    print(f"インデックス一致: {'OK' if indices_match else 'NG'}")
     print(f"値一致: {'OK' if values_match else 'NG'}")
 
-    if not keys_match:
-        # 差分の最初の箇所を出力
-        diffs = np.nonzero(sorted_keys != cpu_sorted_keys)[0]
-        first = diffs[0] if diffs.size > 0 else None
-        print(f"キー差分の最初のインデックス: {first}")
-        if first is not None:
-            print(f" GPU: {sorted_keys[first-2:first+3]}")
-            print(f" CPU: {cpu_sorted_keys[first-2:first+3]}")
-
     if not values_match:
-        diffs = np.nonzero(sorted_values != expected_values)[0]
+        # 差分の最初の箇所を出力
+        diffs = np.nonzero(sorted_values != cpu_sorted_values)[0]
         first = diffs[0] if diffs.size > 0 else None
         print(f"値差分の最初のインデックス: {first}")
         if first is not None:
-            print(f" GPU vals: {sorted_values[first-5:first+5]}")
-            print(f" Exp vals: {expected_values[first-5:first+5]}")
+            print(f" GPU: {sorted_values[first-2:first+3]}")
+            print(f" CPU: {cpu_sorted_values[first-2:first+3]}")
+
+    if not indices_match:
+        diffs = np.nonzero(sorted_indices != expected_indices)[0]
+        first = diffs[0] if diffs.size > 0 else None
+        print(f"インデックス差分の最初のインデックス: {first}")
+        if first is not None:
+            print(f" GPU vals: {sorted_indices[first-5:first+5]}")
+            print(f" Exp vals: {expected_indices[first-5:first+5]}")
 
     # CSV に出力（デバッグ用）: 全配列と不一致箇所の差分を保存
     try:
         # 全体のGPU値 / 期待値をそれぞれ保存
-        np.savetxt('gpu_keys.csv', sorted_keys, fmt='%u', delimiter=',')
-        np.savetxt('exp.csv', cpu_sorted_keys, fmt='%u', delimiter=',')
+        np.savetxt('gpu_values.csv', sorted_values, fmt='%u', delimiter=',')
+        np.savetxt('exp_values.csv', cpu_sorted_values, fmt='%u', delimiter=',')
     except Exception as e:
         print(f"CSV 保存に失敗しました: {e}")
 
-    print(f"\nソート結果の確認: {'成功' if (keys_match and values_match) else '失敗'}")
+    print(f"\nソート結果の確認: {'成功' if (indices_match and values_match) else '失敗'}")
 
     # 8. クリーンアップ
-    glDeleteBuffers(2, [key_buf, val_buf])
+    glDeleteBuffers(2, [values_buf, indices_buf])
     glfw.terminate()
 
 
