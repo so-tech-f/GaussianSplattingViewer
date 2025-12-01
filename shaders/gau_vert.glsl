@@ -26,8 +26,9 @@ layout(location = 0) in vec2 position;
 
 
 #define POS_IDX 0
-#define OPACITY_IDX 3
-#define SH_IDX 4
+#define SIGMA_IDX 3
+#define OPACITY_IDX 9
+#define SH_IDX 10
 
 layout (std430, binding=0) buffer gaussian_data {
 	float g_data[];
@@ -41,9 +42,7 @@ layout (std430, binding=0) buffer gaussian_data {
 layout (std430, binding=1) buffer gaussian_order {
 	int gi[];
 };
-layout (std430, binding = 2) readonly buffer sigmas_buffer_id {
-    float sigmas_in[]; // N x 6 floats
-};
+
 uniform mat4 view_matrix;
 uniform mat4 projection_matrix;
 uniform vec3 hfovxy_focal;
@@ -96,8 +95,7 @@ vec4 get_vec4(int offset)
 void main()
 {
 	int boxid = gi[gl_InstanceID];
-	int total_dim = 3 + 1 + sh_dim;
-	int sigmas_idx = boxid * 6;
+	int total_dim = 3 + 6 + 1 + sh_dim;
 	int start = boxid * total_dim;
 	vec4 g_pos = vec4(get_vec3(start + POS_IDX), 1.f);
     vec4 g_pos_view = view_matrix * g_pos;
@@ -116,12 +114,12 @@ void main()
 		return;
 	}
 
-	float sxx = sigmas_in[sigmas_idx + 0];
-	float syy = sigmas_in[sigmas_idx + 1];
-	float szz = sigmas_in[sigmas_idx + 2];
-	float sxy = sigmas_in[sigmas_idx + 3];
-	float sxz = sigmas_in[sigmas_idx + 4];
-	float syz = sigmas_in[sigmas_idx + 5];
+	float sxx = g_data[start + SIGMA_IDX + 0];
+	float syy = g_data[start + SIGMA_IDX + 1];
+	float szz = g_data[start + SIGMA_IDX + 2];
+	float sxy = g_data[start + SIGMA_IDX + 3];
+	float sxz = g_data[start + SIGMA_IDX + 4];
+	float syz = g_data[start + SIGMA_IDX + 5];
 	float g_opacity = g_data[start + OPACITY_IDX];
 
     mat3 cov3d = mat3(

@@ -166,10 +166,6 @@ class OpenGLRenderer(GaussianRenderBase):
                                                          bind_idx=0,
                                                          buffer_id=self.gau_bufferid)
         util.set_uniform_1int(self.program, gaus.sh_dim, "sh_dim")
-        sigmas_buffer_id = gaus.sigmas_buffer
-        glBindBuffer(GL_SHADER_STORAGE_BUFFER, sigmas_buffer_id)
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, sigmas_buffer_id)
-        self.sigmas_bufferid = sigmas_buffer_id
 
     def sort_and_update(self, camera: util.Camera):
         index = _sort_gaussian(self.gaussians, camera.get_view_matrix())
