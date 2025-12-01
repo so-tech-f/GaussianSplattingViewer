@@ -13,16 +13,31 @@ class GaussianData:
     opacity: np.ndarray
     sh: np.ndarray
 
-    def flat(self) -> np.ndarray:
-        ret = np.concatenate([self.xyz, self.sigmas, self.opacity, self.sh], axis=-1)
-        return np.ascontiguousarray(ret)
-
     def __len__(self):
         return len(self.xyz)
 
     @property 
     def sh_dim(self):
         return self.sh.shape[-1]
+
+    @property
+    def pos_buffer(self) -> np.ndarray:
+        # PosBuffer (N x 3)
+        return np.ascontiguousarray(self.xyz.reshape(-1))
+
+    @property
+    def sigma_opacity_buffer(self) -> np.ndarray:
+        # SigmaBuffer (N x 7) = (N x 6) + (N x 1)
+        # シェーダーのロジックに合わせ、Sigmas (6要素) の後に Opacity (1要素) を結合
+        ret = np.concatenate([self.sigmas, self.opacity], axis=-1)
+        print(f"sigma_opacity shape: {ret.shape}") 
+        return np.ascontiguousarray(ret)
+
+    @property
+    def sh_buffer(self) -> np.ndarray:
+        # SHBuffer (N x SH_DIM)
+        print(f"sh shape: {self.sh.shape}")
+        return np.ascontiguousarray(self.sh)
 
 def naive_gaussian():
     gau_xyz = np.array([

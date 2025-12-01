@@ -137,14 +137,18 @@ class OpenGLRenderer(GaussianRenderBase):
             0, 1, 2,
             0, 2, 3
         ], dtype=np.uint32).reshape(2, 3)
-        
+
         # load quad geometry
         vao, buffer_id = util.set_attributes(self.program, ["position"], [self.quad_v])
         util.set_faces_tovao(vao, self.quad_f)
         self.vao = vao
-        self.gau_bufferid = None
+        self.gau_buffers = {
+                'pos': None,
+                'sigma_opacity': None,
+                'sh': None,
+            }
         self.index_bufferid = None
-        self.sigmas_bufferid = None
+
         # opengl settings
         gl.glDisable(gl.GL_CULL_FACE)
         gl.glEnable(gl.GL_BLEND)
@@ -160,20 +164,39 @@ class OpenGLRenderer(GaussianRenderBase):
 
     def update_gaussian_data(self, gaus: util_gau.GaussianData):
         self.gaussians = gaus
-        # load gaussian geometry
-        gaussian_data = gaus.flat()
-        self.gau_bufferid = util.set_storage_buffer_data(self.program, "gaussian_data", gaussian_data,
-                                                         bind_idx=0,
-                                                         buffer_id=self.gau_bufferid)
+
+        # 1. 位置 (xyz) バッファの更新 (Binding 0)
+        pos_data = gaus.pos_buffer
+        self.gau_buffers['pos'] = util.set_storage_buffer_data(
+            self.program, "PosBuffer", pos_data,
+            bind_idx=0,
+            buffer_id=self.gau_buffers['pos']
+        )
+
+        # 2. 共分散と不透明度 (sigmas + opacity) バッファの更新 (Binding 1)
+        sigma_opacity_data = gaus.sigma_opacity_buffer
+        self.gau_buffers['sigma_opacity'] = util.set_storage_buffer_data(
+            self.program, "SigmaBuffer", sigma_opacity_data,
+            bind_idx=1,
+            buffer_id=self.gau_buffers['sigma_opacity']
+        )
+
+        # 3. SH係数 (sh) バッファの更新 (Binding 2)
+        sh_data = gaus.sh_buffer
+        self.gau_buffers['sh'] = util.set_storage_buffer_data(
+            self.program, "SHBuffer", sh_data,
+            bind_idx=2,
+            buffer_id=self.gau_buffers['sh']
+        )
         util.set_uniform_1int(self.program, gaus.sh_dim, "sh_dim")
 
     def sort_and_update(self, camera: util.Camera):
         index = _sort_gaussian(self.gaussians, camera.get_view_matrix())
-        self.index_bufferid = util.set_storage_buffer_data(self.program, "gi", index, 
-                                                           bind_idx=1,
+        self.index_bufferid = util.set_storage_buffer_data(self.program, "gi", index,
+                                                           bind_idx=3,
                                                            buffer_id=self.index_bufferid)
         return
-   
+
     def set_scale_modifier(self, modifier):
         util.set_uniform_1f(self.program, modifier, "scale_modifier")
 
