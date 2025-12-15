@@ -10,11 +10,22 @@ import ctypes
 class GaussianData:
     xyz: np.ndarray
     opacity: np.ndarray
+    sigmas: np.ndarray
     sh: np.ndarray
-    sigmas: np.ndarray = None
-    sigmas_buffer: int = None
+
     def flat(self) -> np.ndarray:
-        ret = np.concatenate([self.xyz, self.opacity, self.sh], axis=-1)
+        # 各インスタンスの次元数
+        n = self.xyz.shape[0]
+        per_inst_dim = self.xyz.shape[1] + self.opacity.shape[1] + self.sigmas.shape[1] + self.sh.shape[1]
+        # 4の倍数にパディング
+        pad = (4 - (per_inst_dim % 4)) % 4
+        print("per_inst_dim+pad", per_inst_dim+pad)
+        print("sh_dim", self.sh.shape[1])
+        if pad > 0:
+            dummy = np.zeros((n, pad), dtype=np.float32)
+            ret = np.concatenate([self.xyz, self.opacity, self.sigmas, self.sh, dummy], axis=-1)
+        else:
+            ret = np.concatenate([self.xyz, self.opacity, self.sigmas, self.sh], axis=-1)
         return np.ascontiguousarray(ret)
 
     def __len__(self):
@@ -53,13 +64,12 @@ def naive_gaussian():
     gau_a = np.array([
         1, 1, 1, 1
     ]).astype(np.float32).reshape(-1, 1)
-    gau_sigmas_buffer = compute_cov3d_in_gpu(gau_s, gau_rot)
+    gau_sigmas = compute_cov3d_in_gpu(gau_s, gau_rot)
     return GaussianData(
         xyz=gau_xyz,
         opacity=gau_a,
-        sh=gau_c,
-        sigmas=None,
-        sigmas_buffer=gau_sigmas_buffer
+        sigmas=gau_sigmas,
+        sh=gau_c
     )
 
 def compute_cov3d(scales: np.ndarray, rots: np.ndarray) -> np.ndarray:
@@ -101,7 +111,7 @@ def compute_cov3d(scales: np.ndarray, rots: np.ndarray) -> np.ndarray:
 
     return sigmas.astype(np.float32)
 
-def compute_cov3d_in_gpu(scales: np.ndarray, rots: np.ndarray) -> int:
+def compute_cov3d_in_gpu(scales: np.ndarray, rots: np.ndarray) -> np.ndarray:
     input_data = np.concatenate((scales, rots), axis=1).astype(np.float32)
     # 入力 ssbo (binding point 0)
     input_buffer = glGenBuffers(1)
@@ -127,12 +137,28 @@ def compute_cov3d_in_gpu(scales: np.ndarray, rots: np.ndarray) -> int:
     glDispatchCompute(num_groups, 1, 1) # 計算を開始
     glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT) # 計算の完了を待つ
 
-    # バッファのバインドを解除
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0)
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, output_buffer)
+
+    # glMapBufferRange を使用してデータを読み取り
+    data_ptr = glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, output_size, GL_MAP_READ_BIT)
+
+    c_pointer = ctypes.c_void_p(data_ptr) 
+    num_elements = num_gaussians * 6
+    c_array = ctypes.cast(c_pointer, ctypes.POINTER(ctypes.c_float * num_elements))
+
+    sigmas = np.frombuffer(c_array.contents, dtype=np.float32).copy()
+    sigmas = sigmas.reshape((num_gaussians, 6))
+
+    # マッピング解除
+    glUnmapBuffer(GL_SHADER_STORAGE_BUFFER)
+
     # GPUリソースを解放
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0)
     glDeleteBuffers(1, [input_buffer])
+    glDeleteBuffers(1, [output_buffer])
     glDeleteProgram(compute_shader_program)
-    return output_buffer
+
+    return sigmas
 
 def load_ply(path):
     plydata = PlyData.read(path)
@@ -152,6 +178,7 @@ def load_ply(path):
         max_sh_degree = int(np.sqrt(extra_coeffs_num / 3 + 1) - 1)
     else:
         max_sh_degree = 0
+    print("max_sh_degree", max_sh_degree)
     assert len(extra_f_names)==3 * (max_sh_degree + 1) ** 2 - 3
     extra_f_names = sorted(extra_f_names, key = lambda x: int(x.split('_')[-1]))
 
@@ -181,7 +208,8 @@ def load_ply(path):
     scales = np.exp(scales)
     scales = scales.astype(np.float32)
 
-    sigmas_buffer = compute_cov3d_in_gpu(scales, rots)
+    sigmas = compute_cov3d_in_gpu(scales, rots)
+
     opacities = 1/(1 + np.exp(- opacities))  # sigmoid
     opacities = opacities.astype(np.float32)
     shs = np.concatenate([features_dc.reshape(-1, 3),
@@ -190,6 +218,6 @@ def load_ply(path):
     return GaussianData(
         xyz=xyz,
         opacity=opacities,
-        sh=shs, 
-        sigmas=None,
-        sigmas_buffer=sigmas_buffer)
+        sigmas=sigmas,
+        sh=shs
+        )
