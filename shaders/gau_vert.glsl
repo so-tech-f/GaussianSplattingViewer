@@ -142,12 +142,12 @@ void main()
                               hfovxy_focal.y, 
                               cov3d, 
                               view_matrix);
-	// 小さいもの（直径 <= 2px）は描画しない（カメラ負荷軽減）
-	// cov2d.x / cov2d.z はそれぞれスクリーン空間での分散（sigma^2, 単位: px^2）
-	float sigma_x = sqrt(max(cov2d.x, 0.0));
-	float sigma_y = sqrt(max(cov2d.z, 0.0));
-	// 直径 = 2 * sigma. 直径 <= 2px => sigma <= 1px
-	if (max(sigma_x, sigma_y) <= 0.5) {
+	// 小さいもの（直径 <= 1px）は描画しない（カメラ負荷軽減）
+	// cov2d.x / cov2d.z はそれぞれスクリーン空間での分散（variance, 単位: px^2）
+	float variance_x = (max(cov2d.x, 0.0));
+	float variance_y = (max(cov2d.z, 0.0));
+	// 直径 = 2 * sqrt(variance). 直径 <= 1px ∴ variance <= 0.25px^2
+	if (max(variance_x, variance_y) < 0.25f) {
 		gl_Position = vec4(-100, -100, -100, 1);
 		return;
 		}
