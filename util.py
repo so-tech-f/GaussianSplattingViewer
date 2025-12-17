@@ -270,6 +270,19 @@ def set_uniform_mat4(shader, content, name):
         content.astype(np.float32)
     )
 
+def set_uniform_mat3(shader, content, name):
+    glUseProgram(shader)
+    if isinstance(content, glm.mat3):
+        content = np.array(content).astype(np.float32)
+    else:
+        content = content.T
+    glUniformMatrix3fv(
+        glGetUniformLocation(shader, name), 
+        1,
+        GL_FALSE,
+        content.astype(np.float32)
+    )
+
 def set_uniform_1f(shader, content, name):
     glUseProgram(shader)
     glUniform1f(

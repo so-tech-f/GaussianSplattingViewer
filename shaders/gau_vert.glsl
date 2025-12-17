@@ -43,6 +43,7 @@ layout (std430, binding=1) buffer gaussian_order {
 	int gi[];
 };
 uniform mat4 view_matrix;
+uniform mat3 W_u;
 uniform mat4 projection_matrix;
 uniform vec3 hfovxy_focal;
 uniform vec3 cam_pos;
@@ -55,7 +56,7 @@ out float alpha;
 out vec3 conic;
 out vec2 coordxy;  // local coordinate in quad, unit in pixel
 
-vec3 computeCov2D(vec4 mean_view, float focal_x, float focal_y, float tan_fovx, float tan_fovy, mat3 cov3D, mat4 viewmatrix)
+vec3 computeCov2D(vec4 mean_view, float focal_x, float focal_y, float tan_fovx, float tan_fovy, mat3 cov3D, mat3 W)
 {
     vec4 t = mean_view;
     // why need this? Try remove this later
@@ -71,7 +72,6 @@ vec3 computeCov2D(vec4 mean_view, float focal_x, float focal_y, float tan_fovx, 
 		0.0f, focal_y / t.z, -(focal_y * t.y) / (t.z * t.z),
 		0, 0, 0
     );
-    mat3 W = transpose(mat3(viewmatrix));
     mat3 T = W * J;
 
     mat3 cov = transpose(T) * transpose(cov3D) * T;
@@ -95,7 +95,7 @@ void main()
 {
 	int boxid = gi[gl_InstanceID];
 	int per_inst_dim = 3 + 1 + 6 + sh_dim;
-	int pad = (4 - (per_inst_dim % 4)) % 4;
+	int pad = (32 - (per_inst_dim % 32)) % 32;
 	int total_dim = per_inst_dim + pad;
 
 	int start = boxid * total_dim;
@@ -141,7 +141,7 @@ void main()
                               hfovxy_focal.x, 
                               hfovxy_focal.y, 
                               cov3d, 
-                              view_matrix);
+                              W_u);
 	// 小さいもの（直径 <= 1px）は描画しない（カメラ負荷軽減）
 	// cov2d.x / cov2d.z はそれぞれスクリーン空間での分散（variance, 単位: px^2）
 	float variance_x = (max(cov2d.x, 0.0));

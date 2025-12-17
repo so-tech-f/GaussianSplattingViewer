@@ -17,8 +17,8 @@ class GaussianData:
         # 各インスタンスの次元数
         n = self.xyz.shape[0]
         per_inst_dim = self.xyz.shape[1] + self.opacity.shape[1] + self.sigmas.shape[1] + self.sh.shape[1]
-        # 4の倍数にパディング
-        pad = (4 - (per_inst_dim % 4)) % 4
+        # 32の倍数にパディング
+        pad = (32 - (per_inst_dim % 32)) % 32
         print("per_inst_dim+pad", per_inst_dim+pad)
         print("sh_dim", self.sh.shape[1])
         if pad > 0:

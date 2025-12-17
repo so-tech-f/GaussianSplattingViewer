@@ -185,7 +185,9 @@ class OpenGLRenderer(GaussianRenderBase):
 
     def update_camera_pose(self, camera: util.Camera):
         view_mat = camera.get_view_matrix()
+        W_u = view_mat[:3, :3].T 
         util.set_uniform_mat4(self.program, view_mat, "view_matrix")
+        util.set_uniform_mat3(self.program, W_u, "W_u")
         util.set_uniform_v3(self.program, camera.position, "cam_pos")
 
     def update_camera_intrin(self, camera: util.Camera):
