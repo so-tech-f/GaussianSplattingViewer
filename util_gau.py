@@ -1,7 +1,6 @@
 import numpy as np
 from plyfile import PlyData
 from dataclasses import dataclass
-from scipy.spatial.transform import Rotation as R
 from OpenGL.GL import *
 import OpenGL.GL.shaders as shaders
 import ctypes
@@ -13,20 +12,50 @@ class GaussianData:
     sigmas: np.ndarray
     sh: np.ndarray
 
-    def flat(self) -> np.ndarray:
-        # 各インスタンスの次元数
+    def pack_to_struct(self) -> np.ndarray:
+        """
+        GLSLの struct Gaussian (std430) と完全に一致するバイナリレイアウトを作成
+        """
         n = self.xyz.shape[0]
-        per_inst_dim = self.xyz.shape[1] + self.opacity.shape[1] + self.sigmas.shape[1] + self.sh.shape[1]
-        # 32の倍数にパディング
-        pad = (32 - (per_inst_dim % 32)) % 32
-        print("per_inst_dim+pad", per_inst_dim+pad)
-        print("sh_dim", self.sh.shape[1])
-        if pad > 0:
-            dummy = np.zeros((n, pad), dtype=np.float32)
-            ret = np.concatenate([self.xyz, self.opacity, self.sigmas, self.sh, dummy], axis=-1)
-        else:
-            ret = np.concatenate([self.xyz, self.opacity, self.sigmas, self.sh], axis=-1)
-        return np.ascontiguousarray(ret)
+
+        # 構造体の定義 (16バイト境界を意識)
+        gaussian_dtype = np.dtype([
+            ('pos_opacity', 'f4', (4,)), # vec4
+            ('sigma_part1', 'f4', (4,)), # vec4
+            ('sigma_part2', 'f4', (4,)), # vec4
+            ('sh_dc',       'f4', (4,)), # vec4
+            ('sh_rest',     'f4', (3, 4)) # vec4 sh_rest[15]
+        ])
+
+        # 構造化配列を確保
+        data = np.zeros(n, dtype=gaussian_dtype)
+
+        # データの流し込み
+        data['pos_opacity'][:, :3] = self.xyz
+        data['pos_opacity'][:, 3] = self.opacity.squeeze()
+
+        # 共分散行列
+        data['sigma_part1'][:, :3] = self.sigmas[:, :3] # sxx, syy, szz
+        data['sigma_part2'][:, :3] = self.sigmas[:, 3:] # sxy, sxz, syz
+
+        # SH係数 (0次)
+        data['sh_dc'][:, :3] = self.sh[:, :3]
+
+        # SH係数 (1-3次)
+        if self.sh.shape[1] > 3:
+            # 高次の係数がある場合、各vec4のxyz成分に順番に詰め込む
+            num_rest_coeffs = (self.sh.shape[1] - 3) // 3
+            # self.sh[:, 3:] が [N, Coeffs*3] の形であることを想定
+            rest_sh_reshaped = self.sh[:, 3:].reshape(n, num_rest_coeffs, 3)
+            data['sh_rest'][:, :num_rest_coeffs, :3] = rest_sh_reshaped
+        print(data["pos_opacity"].shape)
+        print(data["sigma_part1"].shape)
+        print(data["sigma_part2"].shape)
+        print(data["sh_dc"].shape)
+        print(data["sh_rest"].shape)
+        print(f"Data itemsize: {data.itemsize}")
+
+        return data
 
     def __len__(self):
         return len(self.xyz)
@@ -71,45 +100,6 @@ def naive_gaussian():
         sigmas=gau_sigmas,
         sh=gau_c
     )
-
-def compute_cov3d(scales: np.ndarray, rots: np.ndarray) -> np.ndarray:
-    """
-    全ガウス分布のスケールと回転から3次元共分散行列 (N x 6) をベクトル化して計算する。
-
-    Args:
-        scales (np.ndarray): 全ガウス分布のスケール (N, 3).
-        rots (np.ndarray): 全ガウス分布のクォータニオン (N, 4), 順序は (r, x, y, z).
-
-    Returns:
-        np.ndarray: 対称行列 Sigma の6つの独立した要素 (sxx, syy, szz, sxy, sxz, syz) (N, 6).
-    """
-    N = scales.shape[0]
-
-    q_xyzr = rots[:, [1, 2, 3, 0]]
-    R_mat = R.from_quat(q_xyzr).as_matrix()
-
-    S_mat = np.zeros((N, 3, 3), dtype=np.float32)
-    S_mat[:, 0, 0] = scales[:, 0]
-    S_mat[:, 1, 1] = scales[:, 1]
-    S_mat[:, 2, 2] = scales[:, 2]
-
-    R_mat_T = np.transpose(R_mat, (0, 2, 1))
-
-    M = np.matmul(S_mat, R_mat_T)
-    M_T = np.transpose(M, (0, 2, 1))
-
-    Sigma = np.matmul(M_T, M)
-
-    sigmas = np.stack([
-        Sigma[:, 0, 0],  # sxx
-        Sigma[:, 1, 1],  # syy
-        Sigma[:, 2, 2],  # szz
-        Sigma[:, 0, 1],  # sxy
-        Sigma[:, 0, 2],  # sxz
-        Sigma[:, 1, 2],  # syz
-    ], axis=1)
-
-    return sigmas.astype(np.float32)
 
 def compute_cov3d_in_gpu(scales: np.ndarray, rots: np.ndarray) -> np.ndarray:
     input_data = np.concatenate((scales, rots), axis=1).astype(np.float32)

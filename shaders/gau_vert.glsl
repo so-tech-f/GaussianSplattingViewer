@@ -18,29 +18,21 @@
 #define SH_C3_6 -0.5900435899266435f
 
 layout(location = 0) in vec2 position;
-// layout(location = 1) in vec3 g_pos;
-// layout(location = 2) in vec4 g_rot;
-// layout(location = 3) in vec3 g_scale;
-// layout(location = 4) in vec3 g_dc_color;
-// layout(location = 5) in float g_opacity;
 
-
-#define POS_IDX 0
-#define OPACITY_IDX 3
-#define SIGMAS_IDX 4
-#define SH_IDX 10
+struct Gaussian {
+    vec4 pos_opacity; // [x, y, z, opacity]
+    vec4 sigma_part1; // [sxx, syy, szz, pad]
+    vec4 sigma_part2; // [sxy, sxz, syz, pad]
+    vec4 sh_dc;       // [sh0.r, sh0.g, sh0.b, pad]
+    vec4 sh_rest[3]; // 1次(3), 2次(5), 3次(7) の計15個のvec4
+};
 
 layout (std430, binding=0) buffer gaussian_data {
-	float g_data[];
-	// compact version of following data
-	// vec3 g_pos[];
-	// vec4 g_rot[];
-	// vec3 g_scale[];
-	// float g_opacity[];
-	// vec3 g_sh[];
+    Gaussian g_data[];
 };
+
 layout (std430, binding=1) buffer gaussian_order {
-	int gi[];
+    int gi[];
 };
 uniform mat4 view_matrix;
 uniform mat3 W_u;
@@ -48,7 +40,6 @@ uniform mat4 projection_matrix;
 uniform vec3 hfovxy_focal;
 uniform vec3 cam_pos;
 uniform int sh_dim;
-uniform float scale_modifier;
 uniform int render_mod;  // > 0 render 0-ith SH dim, -1 depth, -2 bill board, -3 gaussian
 
 out vec3 color;
@@ -59,7 +50,6 @@ out vec2 coordxy;  // local coordinate in quad, unit in pixel
 vec3 computeCov2D(vec4 mean_view, float focal_x, float focal_y, float tan_fovx, float tan_fovy, mat3 cov3D, mat3 W)
 {
     vec4 t = mean_view;
-    // why need this? Try remove this later
     float limx = 1.3f * tan_fovx;
     float limy = 1.3f * tan_fovy;
     float txtz = t.x / t.z;
@@ -69,103 +59,75 @@ vec3 computeCov2D(vec4 mean_view, float focal_x, float focal_y, float tan_fovx, 
 
     mat3 J = mat3(
         focal_x / t.z, 0.0f, -(focal_x * t.x) / (t.z * t.z),
-		0.0f, focal_y / t.z, -(focal_y * t.y) / (t.z * t.z),
-		0, 0, 0
+        0.0f, focal_y / t.z, -(focal_y * t.y) / (t.z * t.z),
+        0.0, 0.0, 0.0
     );
     mat3 T = W * J;
 
     mat3 cov = transpose(T) * transpose(cov3D) * T;
-    // Apply low-pass filter: every Gaussian should be at least
-	// one pixel wide/high. Discard 3rd row and column.
-	cov[0][0] += 0.3f;
-	cov[1][1] += 0.3f;
+    cov[0][0] += 0.3f;
+    cov[1][1] += 0.3f;
     return vec3(cov[0][0], cov[0][1], cov[1][1]);
-}
-
-vec3 get_vec3(int offset)
-{
-	return vec3(g_data[offset], g_data[offset + 1], g_data[offset + 2]);
-}
-vec4 get_vec4(int offset)
-{
-	return vec4(g_data[offset], g_data[offset + 1], g_data[offset + 2], g_data[offset + 3]);
 }
 
 void main()
 {
-	int boxid = gi[gl_InstanceID];
-	int per_inst_dim = 3 + 1 + 6 + sh_dim;
-	int pad = (32 - (per_inst_dim % 32)) % 32;
-	int total_dim = per_inst_dim + pad;
+    int boxid = gi[gl_InstanceID];
+    Gaussian g = g_data[boxid];
 
-	int start = boxid * total_dim;
-	vec4 g_pos_opacity = get_vec4(start+POS_IDX);
-	vec4 g_pos = vec4(g_pos_opacity.xyz, 1.f);
+    vec4 g_pos = vec4(g.pos_opacity.xyz, 1.0f);
     vec4 g_pos_view = view_matrix * g_pos;
-	// cull back faces
-	if (g_pos_view.z >= 0.0) {
-		gl_Position = vec4(-100, -100, -100, 1);
-		return;
-		}
+
+    if (g_pos_view.z >= 0.0) {
+        gl_Position = vec4(-100, -100, -100, 1);
+        return;
+    }
+
     vec4 g_pos_screen = projection_matrix * g_pos_view;
-	g_pos_screen.xyz = g_pos_screen.xyz / g_pos_screen.w;
-    g_pos_screen.w = 1.f;
-	// early culling
-	if (any(greaterThan(abs(g_pos_screen.xyz), vec3(1.3))))
-	{
-		gl_Position = vec4(-100, -100, -100, 1);
-		return;
-	}
+    g_pos_screen.xyz /= g_pos_screen.w;
+	g_pos_screen.w = 1.f;
 
-	float g_opacity = g_pos_opacity.w;
-	int sigmas_start = start + SIGMAS_IDX;
-	vec3 sigmas_diag = get_vec3(sigmas_start);
-	vec3 sigmas_off_diag = get_vec3(sigmas_start + 3);
-
-	float sxx = sigmas_diag.x;
-	float syy = sigmas_diag.y;
-	float szz = sigmas_diag.z;
-	float sxy = sigmas_off_diag.x;
-	float sxz = sigmas_off_diag.y;
-	float syz = sigmas_off_diag.z;
+    if (any(greaterThan(abs(g_pos_screen.xyz), vec3(1.3)))) {
+        gl_Position = vec4(-100, -100, -100, 1);
+        return;
+    }
 
     mat3 cov3d = mat3(
-		sxx, sxy, sxz,
-		sxy, syy, syz,
-		sxz, syz, szz
-	);
-    vec2 wh = 2 * hfovxy_focal.xy * hfovxy_focal.z;
-    vec3 cov2d = computeCov2D(g_pos_view, 
-                              hfovxy_focal.z, 
-                              hfovxy_focal.z, 
-                              hfovxy_focal.x, 
-                              hfovxy_focal.y, 
-                              cov3d, 
-                              W_u);
-	// 小さいもの（直径 <= 1px）は描画しない（カメラ負荷軽減）
-	// cov2d.x / cov2d.z はそれぞれスクリーン空間での分散（variance, 単位: px^2）
-	float variance_x = (max(cov2d.x, 0.0));
-	float variance_y = (max(cov2d.z, 0.0));
-	// 直径 = 2 * sqrt(variance). 直径 <= 1px ∴ variance <= 0.25px^2
-	if (max(variance_x, variance_y) < 0.25f) {
-		gl_Position = vec4(-100, -100, -100, 1);
-		return;
-		}
+        g.sigma_part1.x, g.sigma_part2.x, g.sigma_part2.y, // 列1: sxx, sxy, sxz
+        g.sigma_part2.x, g.sigma_part1.y, g.sigma_part2.z, // 列2: sxy, syy, syz
+        g.sigma_part2.y, g.sigma_part2.z, g.sigma_part1.z  // 列3: sxz, syz, szz
+    );
+
+    vec3 cov2d = computeCov2D(
+							g_pos_view,
+                            hfovxy_focal.z,
+							hfovxy_focal.z,
+                            hfovxy_focal.x,
+							hfovxy_focal.y,
+                            cov3d,
+							W_u
+							);
+
+    if (max(cov2d.x, cov2d.z) < 0.25f) {
+        gl_Position = vec4(-100, -100, -100, 1);
+        return;
+    }
     // Invert covariance (EWA algorithm)
-	float det = (cov2d.x * cov2d.z - cov2d.y * cov2d.y);
-	if (det == 0.0f)
-		gl_Position = vec4(0.f, 0.f, 0.f, 0.f);
-    
-    float det_inv = 1.f / det;
-	conic = vec3(cov2d.z * det_inv, -cov2d.y * det_inv, cov2d.x * det_inv);
-    
-    vec2 quadwh_scr = vec2(3.f * sqrt(cov2d.x), 3.f * sqrt(cov2d.z));  // screen space half quad height and width
-    vec2 quadwh_ndc = quadwh_scr / wh * 2;  // in ndc space
-    g_pos_screen.xy = g_pos_screen.xy + position * quadwh_ndc;
+    float det = (cov2d.x * cov2d.z - cov2d.y * cov2d.y);
+    if (det == 0.0f) { gl_Position = vec4(0.0); return; }
+
+    float det_inv = 1.0f / det;
+    conic = vec3(cov2d.z * det_inv, -cov2d.y * det_inv, cov2d.x * det_inv);
+
+    vec2 wh = 2.0 * hfovxy_focal.xy * hfovxy_focal.z;
+    vec2 quadwh_scr = vec2(3.0 * sqrt(cov2d.x), 3.0 * sqrt(cov2d.z));  // screen space half quad height and width
+    vec2 quadwh_ndc = quadwh_scr / wh * 2.0;  // in ndc space
+	g_pos_screen.xy += position * quadwh_ndc;
+
     coordxy = position * quadwh_scr;
     gl_Position = g_pos_screen;
-    
-    alpha = g_opacity;
+
+    alpha = g.pos_opacity.w;
 
 	if (render_mod == -1)
 	{
@@ -176,42 +138,35 @@ void main()
 		return;
 	}
 
-	// Covert SH to color
-	int sh_start = start + SH_IDX;
-	vec3 dir = g_pos.xyz - cam_pos;
-    dir = normalize(dir);
-	color = SH_C0 * get_vec3(sh_start);
+    // --- SH Color 計算 (球面調和関数) ---
+    vec3 dir = normalize(g_pos.xyz - cam_pos);
+    color = SH_C0 * g.sh_dc.xyz; // 0次 (DC)
 
-	if (sh_dim > 3 && render_mod >= 1)  // 1 * 3
-	{
-		float x = dir.x;
-		float y = dir.y;
-		float z = dir.z;
-		color = color - SH_C1 * y * get_vec3(sh_start + 1 * 3) + SH_C1 * z * get_vec3(sh_start + 2 * 3) - SH_C1 * x * get_vec3(sh_start + 3 * 3);
+    if (sh_dim > 3 && render_mod >= 1) {
+        float x = dir.x, y = dir.y, z = dir.z;
+        // 1次: sh_rest[0..2]
+        color += SH_C1 * (-y * g.sh_rest[0].xyz + z * g.sh_rest[1].xyz - x * g.sh_rest[2].xyz);
 
-		if (sh_dim > 12 && render_mod >= 2)  // (1 + 3) * 3
-		{
-			float xx = x * x, yy = y * y, zz = z * z;
-			float xy = x * y, yz = y * z, xz = x * z;
-			color = color +
-				SH_C2_0 * xy * get_vec3(sh_start + 4 * 3) +
-				SH_C2_1 * yz * get_vec3(sh_start + 5 * 3) +
-				SH_C2_2 * (2.0f * zz - xx - yy) * get_vec3(sh_start + 6 * 3) +
-				SH_C2_3 * xz * get_vec3(sh_start + 7 * 3) +
-				SH_C2_4 * (xx - yy) * get_vec3(sh_start + 8 * 3);
+        // if (sh_dim > 12 && render_mod >= 2) {
+        //     float xx = x*x, yy = y*y, zz = z*z, xy = x*y, yz = y*z, xz = x*z;
+        //     // 2次: sh_rest[3..7]
+        //     color += SH_C2_0 * xy * g.sh_rest[3].xyz +
+        //              SH_C2_1 * yz * g.sh_rest[4].xyz +
+        //              SH_C2_2 * (2.0*zz - xx - yy) * g.sh_rest[5].xyz +
+        //              SH_C2_3 * xz * g.sh_rest[6].xyz +
+        //              SH_C2_4 * (xx - yy) * g.sh_rest[7].xyz;
 
-			if (sh_dim > 27 && render_mod >= 3)  // (1 + 3 + 5) * 3
-			{
-				color = color +
-					SH_C3_0 * y * (3.0f * xx - yy) * get_vec3(sh_start + 9 * 3) +
-					SH_C3_1 * xy * z * get_vec3(sh_start + 10 * 3) +
-					SH_C3_2 * y * (4.0f * zz - xx - yy) * get_vec3(sh_start + 11 * 3) +
-					SH_C3_3 * z * (2.0f * zz - 3.0f * xx - 3.0f * yy) * get_vec3(sh_start + 12 * 3) +
-					SH_C3_4 * x * (4.0f * zz - xx - yy) * get_vec3(sh_start + 13 * 3) +
-					SH_C3_5 * z * (xx - yy) * get_vec3(sh_start + 14 * 3) +
-					SH_C3_6 * x * (xx - 3.0f * yy) * get_vec3(sh_start + 15 * 3);
-			}
-		}
-	}
-	color += 0.5f;
+        //     if (sh_dim > 27 && render_mod >= 3) {
+        //         // 3次: sh_rest[8..14]
+        //         color += SH_C3_0 * y * (3.0*xx - yy) * g.sh_rest[8].xyz +
+        //                  SH_C3_1 * xy * z * g.sh_rest[9].xyz +
+        //                  SH_C3_2 * y * (4.0*zz - xx - yy) * g.sh_rest[10].xyz +
+        //                  SH_C3_3 * z * (2.0*zz - 3.0*xx - 3.0*yy) * g.sh_rest[11].xyz +
+        //                  SH_C3_4 * x * (4.0*zz - xx - yy) * g.sh_rest[12].xyz +
+        //                  SH_C3_5 * z * (xx - yy) * g.sh_rest[13].xyz +
+        //                  SH_C3_6 * x * (xx - 3.0*yy) * g.sh_rest[14].xyz;
+        //     }
+        // }
+    }
+    color += 0.5f;
 }

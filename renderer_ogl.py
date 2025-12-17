@@ -160,12 +160,15 @@ class OpenGLRenderer(GaussianRenderBase):
 
     def update_gaussian_data(self, gaus: util_gau.GaussianData):
         self.gaussians = gaus
-        # load gaussian geometry
-        gaussian_data = gaus.flat()
-        self.gau_bufferid = util.set_storage_buffer_data(self.program, "gaussian_data", gaussian_data,
-                                                         bind_idx=0,
-                                                         buffer_id=self.gau_bufferid)
-        util.set_uniform_1int(self.program, gaus.sh_dim, "sh_dim")
+        struct_data = gaus.pack_to_struct()
+
+        self.gau_bufferid = util.set_storage_buffer_data(
+            self.program,
+            "gaussian_data",
+            struct_data,
+            bind_idx=0,
+            buffer_id=self.gau_bufferid
+        )
 
     def sort_and_update(self, camera: util.Camera):
         index = _sort_gaussian(self.gaussians, camera.get_view_matrix())
